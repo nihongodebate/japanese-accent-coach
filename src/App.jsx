@@ -3,8 +3,8 @@ import { Mic, Square, Play, RefreshCw, ChevronRight, Award, AlertCircle, Info } 
 
 /**
  * API Configuration
- * 이 환경에서는 apiKey를 빈 문자열로 설정합니다.
- * 실행 시 시스템에서 자동으로 키를 제공합니다.
+ * 実行環境からAPIキーが自動的に提供されるため、ここでは空の文字列を設定します。
+ * Vercelなどの外部環境で実行する場合は、環境変数から読み込む設定に戻す必要があります。
  */
 const apiKey = ""; 
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
@@ -29,14 +29,14 @@ const WORD_LIST = [
   { 
     word: "あつい", 
     reading: "あつい", 
-    accent: "중고형 (暑이: 덥다)", 
+    accent: "중고형 (暑い: 덥다)", 
     pattern: [0, 1, 0],
     description: "가운데 음절인 'つ'를 가장 높게 발음하는 것이 포인트입니다.", 
     id: 3 
   },
   { 
     word: "がっこう", 
-    reading: "がっこう", 
+    reading: "가っこう", 
     accent: "평판형 (学校: 학교)", 
     pattern: [0, 1, 1, 1],
     description: "첫 음만 낮게 시작하고 나머지는 평평하고 높게 유지합니다.", 
@@ -67,7 +67,7 @@ const PitchDiagram = ({ pattern, reading }) => {
         {pattern.map((val, i) => {
           if (i === pattern.length - 1) return null;
           return (
-            <line key={`l-${i}`} x1={getX(i)} y1={getY(val)} x2={getX(i + 1)} y2={getY(pattern[i + 1])} stroke="#6366f1" strokeWidth="2" />
+            <line key={`l-${i}`} x1={getX(i)} y1={getY(val)} x2={getX(i+1)} y2={getY(pattern[i+1])} stroke="#6366f1" strokeWidth="2" />
           );
         })}
         {pattern.map((val, i) => (
@@ -98,9 +98,12 @@ const App = () => {
   const streamRef = useRef(null);
 
   const getSupportedMimeType = () => {
-    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
-    for (const type of types) if (MediaRecorder.isTypeSupported(type)) return type;
-    return "audio/webm";
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/aac"];
+    if (typeof MediaRecorder === 'undefined') return "audio/wav";
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) return type;
+    }
+    return "audio/wav";
   };
 
   const startRecording = async () => {
@@ -109,25 +112,29 @@ const App = () => {
       audioChunksRef.current = [];
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      
       const type = getSupportedMimeType();
       setMimeType(type);
-      const recorder = new MediaRecorder(stream, { mimeType: type });
+      
+      const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
+      
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       recorder.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type });
-        if (blob.size < 1000) {
-          setError("녹음이 너무 짧거나 소리가 입력되지 않았습니다.");
-          return;
-        }
         setAudioUrl(URL.createObjectURL(blob));
         const reader = new FileReader();
         reader.readAsDataURL(blob);
-        reader.onloadend = () => setBase64Audio(reader.result.split(',')[1]);
+        reader.onloadend = () => {
+          setBase64Audio(reader.result.split(',')[1]);
+        };
       };
       recorder.start();
       setIsRecording(true);
-    } catch (err) { setError("마이크 권한을 허용해 주세요."); setIsRecording(false); }
+    } catch (err) { 
+      setError(`마이크 오류: ${err.message}`); 
+      setIsRecording(false); 
+    }
   };
 
   const stopRecording = () => {
@@ -140,31 +147,30 @@ const App = () => {
 
   const evaluate = async () => {
     if (!base64Audio) return;
+    
     setLoading(true); setEvaluation(null); setError(null);
     
-    const prompt = `당신은 엄격하면서도 친절한 일본어 교사입니다. 한국인 초급 학습자의 발음을 분석하고 반드시 한국어(Korean)로 피드백을 제공하세요.
-    
-대상 단어: ${currentWord.word} (${currentWord.reading})
-기대되는 악센트 패턴: ${currentWord.accent}
-
-【규칙】
-1. 음성이 확인되지 않거나 무음일 경우 score를 0으로 하고 result에 "음성을 인식할 수 없습니다"라고 적어주세요.
-2. 모든 피드백 텍스트(result, accent_feedback, advice)는 한국어로 작성하세요.
-3. 악센트의 높낮이와 한국인이 자주 틀리는 발음(탁음, 촉음 등)을 중심으로 평가하세요.
-
+    const prompt = `당신은 일본어 교사입니다. 발음을 분석하여 JSON으로 응답하세요.
 {
-  "score": 숫자(0-100),
-  "result": "판정 메시지 (한국어)",
-  "accent_feedback": "악센트 분석 내용 (한국어)",
-  "advice": "한국인 학습자를 위한 구체적인 조언 (한국어)"
-}`;
+  "score": 0-100,
+  "result": "결과 요약",
+  "accent_feedback": "악센트 분석",
+  "advice": "한국인을 위한 조언"
+}
+대상 단어: ${currentWord.word} (${currentWord.reading})`;
 
     const payload = {
-      contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: mimeType.split(';')[0], data: base64Audio } }] }],
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType: mimeType.split(';')[0], data: base64Audio } }
+        ]
+      }],
       generationConfig: { responseMimeType: "application/json" }
     };
 
-    const callApiWithBackoff = async (at = 0) => {
+    // Exponential backoff for API calls
+    const callApi = async (attempt = 0) => {
       try {
         const res = await fetch(`${BASE_URL}?key=${apiKey}`, { 
           method: 'POST', 
@@ -172,172 +178,115 @@ const App = () => {
           body: JSON.stringify(payload) 
         });
         
-        if (!res.ok) throw new Error('API Error');
+        if (!res.ok) {
+          const errJson = await res.json();
+          throw new Error(`HTTP ${res.status}: ${errJson.error?.message || '알 수 없는 오류'}`);
+        }
+        
         const data = await res.json();
         const resultText = data.candidates[0].content.parts[0].text;
-        const parsed = JSON.parse(resultText);
-        
-        if (parsed.score === 0 && parsed.result.includes("인식할 수 없")) {
-          setError("AI가 목소리를 듣지 못했습니다. 다시 한번 녹음해 주세요.");
-        } else {
-          setEvaluation(parsed);
-        }
+        setEvaluation(JSON.parse(resultText));
       } catch (e) {
-        if (at < 4) {
-          const delay = Math.pow(2, at) * 1000;
-          setTimeout(() => callApiWithBackoff(at + 1), delay);
+        if (attempt < 4) {
+          const delay = Math.pow(2, attempt) * 1000;
+          setTimeout(() => callApi(attempt + 1), delay);
         } else {
-          setError("분석에 실패했습니다. 다시 시도해 주세요.");
+          setError(`분석 실패: ${e.message}`);
+          setLoading(false);
         }
       } finally {
-        setLoading(false);
+        if (attempt >= 4) setLoading(false);
       }
     };
 
-    callApiWithBackoff();
+    callApi();
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-100 flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+    <div className="fixed inset-0 bg-slate-100 flex items-center justify-center p-0 sm:p-4 overflow-hidden font-sans">
       <div className="w-full max-w-md bg-white h-full sm:h-[90%] sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
-        
-        {/* Header */}
-        <header className="bg-indigo-600 px-4 py-3 text-white flex justify-between items-center shrink-0 shadow-md z-10">
+        <header className="bg-indigo-600 px-4 py-3 text-white flex justify-between items-center shrink-0 shadow-md">
           <div>
-            <h1 className="font-bold text-lg leading-tight">일본어 발음 코치</h1>
-            <p className="text-[10px] text-indigo-200">For Korean Learners</p>
+            <h1 className="font-bold text-lg leading-tight text-white">일본어 발음 코치</h1>
+            <p className="text-[10px] text-indigo-200">Gemini AI Engine</p>
           </div>
-          <div className="bg-indigo-500 px-3 py-1 rounded-full text-[10px] font-bold">
-            초급
-          </div>
+          <div className="bg-indigo-500 px-3 py-1 rounded-full text-[10px] font-bold text-white">LIVE</div>
         </header>
 
-        {/* Content Area */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          
-          {/* Question Display */}
           <section className="p-4 text-center space-y-2 shrink-0 bg-slate-50/50 border-b border-slate-100">
-            <div className="text-5xl font-black text-slate-800 tracking-tighter">
-              {currentWord.word}
-            </div>
-            <div className="text-base text-indigo-600 font-bold">
-              {currentWord.reading}
-            </div>
-            
+            <div className="text-5xl font-black text-slate-800 tracking-tighter">{currentWord.word}</div>
+            <div className="text-base text-indigo-600 font-bold">{currentWord.reading}</div>
             <div className="flex justify-center pt-1">
               <div className="bg-white px-4 py-1 rounded-xl border border-slate-200 shadow-sm">
                 <PitchDiagram pattern={currentWord.pattern} reading={currentWord.reading} />
               </div>
             </div>
-            <p className="text-[10px] text-slate-500 font-bold px-6">
-              {currentWord.accent}
-            </p>
           </section>
 
-          {/* Interaction Area */}
           <section className="px-6 py-4 flex flex-col items-center justify-center shrink-0">
-            <div className="relative mb-2">
-              {!isRecording ? (
-                <button 
-                  onClick={startRecording} 
-                  disabled={loading} 
-                  className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center text-white shadow-lg active:scale-95 transition-transform disabled:opacity-50"
-                >
-                  <Mic size={30} />
-                </button>
-              ) : (
-                <button 
-                  onClick={stopRecording} 
-                  className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-white shadow-lg"
-                >
-                  <Square size={24} className="animate-pulse" />
-                </button>
-              )}
-              {isRecording && (
-                <div className="absolute inset-0 rounded-full bg-red-400 animate-ping opacity-20 scale-125 -z-10"></div>
-              )}
-            </div>
-            <div className="h-4">
-              {isRecording && <p className="text-red-500 text-[10px] font-bold animate-pulse uppercase tracking-widest">Recording...</p>}
+            {!isRecording ? (
+              <button onClick={startRecording} disabled={loading} className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center text-white shadow-lg active:scale-95 transition-transform disabled:opacity-50">
+                <Mic size={30} className="text-white" />
+              </button>
+            ) : (
+              <button onClick={stopRecording} className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-white shadow-lg">
+                <Square size={24} className="animate-pulse text-white" />
+              </button>
+            )}
+            <div className="h-6 mt-2">
+              {isRecording && <p className="text-red-500 text-[10px] font-bold animate-pulse">RECORDING...</p>}
             </div>
           </section>
 
-          {/* Results Area - Scrollable */}
           <section className="flex-1 overflow-y-auto px-4 pb-4 scroll-smooth">
             {!evaluation && audioUrl && !isRecording && (
-              <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
+              <div className="space-y-3 animate-in fade-in">
                 <div className="bg-indigo-50/50 p-3 rounded-2xl flex flex-col items-center border border-indigo-100">
                    <audio src={audioUrl} controls className="h-8 w-full max-w-[240px]" />
-                   <p className="text-[9px] text-indigo-400 mt-1 font-bold tracking-tight">내 목소리 듣기</p>
                 </div>
-                <button 
-                  onClick={evaluate} 
-                  disabled={loading} 
-                  className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-sm shadow-xl flex items-center justify-center gap-3 active:translate-y-0.5 transition-all"
-                >
-                  {loading ? <RefreshCw className="animate-spin" size={18} /> : <span>선생님께 채점받기</span>}
+                <button onClick={evaluate} disabled={loading} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-sm shadow-xl flex items-center justify-center gap-3">
+                  {loading ? <RefreshCw className="animate-spin text-white" size={18} /> : <span className="text-white">선생님께 채점받기</span>}
                 </button>
               </div>
             )}
 
             {error && (
-              <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl flex items-center gap-2 border border-red-100">
-                <AlertCircle size={14} /> {error}
+              <div className="p-4 bg-red-50 text-red-600 text-xs rounded-xl flex items-start gap-2 border border-red-200 break-all">
+                <AlertCircle size={16} className="shrink-0" />
+                <p><strong>Error Details:</strong><br/>{error}</p>
               </div>
             )}
 
             {evaluation && (
-              <div className="space-y-3 animate-in zoom-in-95 duration-300">
+              <div className="space-y-3 animate-in zoom-in-95">
                 <div className="bg-white rounded-2xl border-2 border-indigo-100 p-4 shadow-sm space-y-3">
                   <div className="flex justify-between items-end border-b border-slate-100 pb-2">
                     <div className="flex items-center gap-2">
                       <Award className="text-amber-500" size={20} />
                       <span className="text-xs font-bold text-slate-500">SCORE</span>
                     </div>
-                    <div className="text-3xl font-black text-indigo-600">{evaluation.score}<span className="text-xs ml-1 font-bold">점</span></div>
+                    <div className="text-3xl font-black text-indigo-600">{evaluation.score}点</div>
                   </div>
-                  
-                  <div className="text-sm font-bold text-center text-indigo-800 bg-indigo-50 py-2 rounded-xl">
-                    「{evaluation.result}」
-                  </div>
-                  
-                  <div className="space-y-3 pt-1">
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Accent Feedback</h4>
-                      <p className="text-[11px] text-slate-600 leading-relaxed font-medium bg-slate-50 p-2 rounded-lg whitespace-pre-wrap">{evaluation.accent_feedback}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black text-amber-500 uppercase tracking-tighter">Teacher's Advice</h4>
-                      <div className="bg-amber-50 p-3 rounded-lg text-[11px] text-amber-900 leading-relaxed border border-amber-100 font-medium whitespace-pre-wrap">
-                        {evaluation.advice}
-                      </div>
-                    </div>
+                  <div className="text-sm font-bold text-center text-indigo-800 bg-indigo-50 py-2 rounded-xl">「{evaluation.result}」</div>
+                  <div className="space-y-3 pt-1 text-[11px]">
+                    <p className="text-slate-600 leading-relaxed font-medium bg-slate-100 p-2 rounded-lg">{evaluation.accent_feedback}</p>
+                    <div className="bg-amber-50 p-3 rounded-lg text-amber-900 border border-amber-100 font-medium">{evaluation.advice}</div>
                   </div>
                 </div>
-                <p className="text-center text-[9px] text-slate-300 pb-2 tracking-widest uppercase">End of Feedback</p>
               </div>
             )}
           </section>
         </main>
 
-        {/* Footer */}
-        <footer className="px-4 py-3 bg-white border-t border-slate-100 flex justify-between items-center shrink-0 z-10">
-          <button 
-            onClick={() => {setEvaluation(null); setAudioUrl(null); setError(null);}} 
-            className="text-slate-400 text-xs font-bold hover:text-indigo-600 transition-colors"
-          >
-            다시 하기
-          </button>
-          <button 
-            onClick={() => {
-              const idx = WORD_LIST.findIndex(w => w.id === currentWord.id);
-              setCurrentWord(WORD_LIST[(idx + 1) % WORD_LIST.length]);
-              setEvaluation(null); setAudioUrl(null); setError(null);
-            }} 
-            className="px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-2 active:scale-95 transition-transform"
-          >
-            <span>다음 문제</span>
-            <ChevronRight size={16} />
+        <footer className="px-4 py-3 bg-white border-t border-slate-100 flex justify-between items-center shrink-0">
+          <button onClick={() => {setEvaluation(null); setAudioUrl(null); setError(null);}} className="text-slate-400 text-xs font-bold">다시 하기</button>
+          <button onClick={() => {
+            const idx = WORD_LIST.findIndex(w => w.id === currentWord.id);
+            setCurrentWord(WORD_LIST[(idx + 1) % WORD_LIST.length]);
+            setEvaluation(null); setAudioUrl(null); setError(null);
+          }} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-2">
+            <span className="text-white">다음 문제</span><ChevronRight size={16} className="text-white" />
           </button>
         </footer>
       </div>
