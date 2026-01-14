@@ -7,7 +7,7 @@ import { Mic, Square, Play, RefreshCw, ChevronRight, Award, AlertCircle, Info } 
  * 実行時にシステムによって自動的にキーが注入されます。
  * (注: Vercelなどの外部環境にデプロイする場合は、環境変数 import.meta.env... を使用する形式に戻してください)
  */
-const apiKey = ""; 
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""; 
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
 
 const WORD_LIST = [
