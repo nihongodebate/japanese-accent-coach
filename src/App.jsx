@@ -6,7 +6,7 @@ import { Mic, Square, Play, RefreshCw, ChevronRight, Award, AlertCircle, Info } 
  * 実行環境からAPIキーが自動的に提供されるため、ここでは空の文字列を設定します。
  * Vercelなどの外部環境で実行する場合は、環境変数から読み込む設定に戻す必要があります。
  */
-const apiKey = ""; 
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""; 
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
 
 const WORD_LIST = [
